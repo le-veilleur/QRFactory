@@ -163,9 +163,9 @@ Les contributions sont les bienvenues ! Veuillez suivre les étapes suivantes po
 Ce projet est en cours de développement. Voici les fonctionnalités actuellement implémentées :
 
 - [x] Encodage numérique
-- [ ] Encodage alphanumérique
-- [ ] Encodage byte
-- [ ] Encodage Kanji
+- [x] Encodage alphanumérique
+- [x] Encodage byte
+- [x] Encodage Kanji
 - [ ] Génération d'image QR code
 - [ ] Interface utilisateur (API ou CLI)
 
