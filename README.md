@@ -77,37 +77,15 @@ Le projet est structuré comme suit :
 │       └── main.go
 │
 ├── internal/
-│   ├── api/
-│   │   └── handlers/
-│   │       ├── qr_handler.go
-│   │       └── qr_handler_test.go
-│   │
-│   ├── repository/
-│   │   ├── qr_repository.go
-│   │   └── qr_repository_test.go
-│   │
-│   ├── service/
-│   │   ├── qr_service.go
-│   │   └── qr_service_test.go
 │   │
 │   ├── model/
-│   │   ├── qr_code.go
-│   │   └── qr_code_test.go
-│   │
-│   ├── routes/
-│   │   ├── routes.go
-│   │   └── routes_test.go
-│   │
-│   └── util/
+│       ├── qr_code.go
+│       └── qr_code_test.go
 │
 ├── pkg/
 │   ├── config/
 │   │   ├── config.go
 │   │   └── config_test.go
-│   │
-│   ├── db/
-│   │   ├── db.go
-│   │   └── db_test.go
 │   │
 │   └── qr/
 │       ├── generator.go
