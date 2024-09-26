@@ -218,9 +218,9 @@ func GenerateQRMatrix(version int, data string) *image.RGBA {
 	qrMatrix := image.NewRGBA(image.Rect(0, 0, size, size))
 
 	// Ajout des motifs de positionnement, de timing et d'alignement
-	addPositionPatterns(qrMatrix)
-	addTimingPatterns(qrMatrix)
-	addAlignmentPatterns(qrMatrix, version)
+	AddPositionPatterns(qrMatrix)
+	AddTimingPatterns(qrMatrix)
+	AddAlignmentPatterns(qrMatrix, version)
 
 	// Encodage des données en fonction de leur type
 	var encodedData string
@@ -238,7 +238,7 @@ func GenerateQRMatrix(version int, data string) *image.RGBA {
 	}
 
 	// Ajout de la redondance (correction d'erreurs)
-	errorCorrectionData := generateErrorCorrection([]byte(encodedData), "L") // Exemple avec niveau de correction "L"
+	errorCorrectionData := GenerateErrorCorrection([]byte(encodedData), "L") // Exemple avec niveau de correction "L"
 	fullData := encodedData + string(errorCorrectionData)
 
 	// Remplissage de la matrice QR avec les données encodées
@@ -255,13 +255,13 @@ func GenerateQRMatrix(version int, data string) *image.RGBA {
 	}
 
 	// Appliquer le masquage (sélectionnez le meilleur masque parmi les 8)
-	bestMaskedMatrix := applyMask(qrMatrix, 0) // Exemple avec le masque 0
+	bestMaskedMatrix := ApplyMask(qrMatrix, 0) // Exemple avec le masque 0
 
 	return bestMaskedMatrix
 }
 
 // Ajoute les motifs de positionnement à la matrice QR
-func addPositionPatterns(matrix *image.RGBA) {
+func AddPositionPatterns(matrix *image.RGBA) {
 	size := matrix.Bounds().Max.X
 	positions := []struct {
 		x, y int
@@ -285,7 +285,7 @@ func addPositionPatterns(matrix *image.RGBA) {
 }
 
 // Ajoute les motifs de timing à la matrice QR
-func addTimingPatterns(matrix *image.RGBA) {
+func AddTimingPatterns(matrix *image.RGBA) {
 	size := matrix.Bounds().Max.X
 	for i := 8; i < size-8; i++ {
 		col := color.RGBA{255, 255, 255, 255} // Blanc par défaut
@@ -298,15 +298,15 @@ func addTimingPatterns(matrix *image.RGBA) {
 }
 
 // Ajoute les motifs d'alignement à la matrice QR
-func addAlignmentPatterns(matrix *image.RGBA, version int) {
-	positions := getAlignmentPatternPositions(version)
+func AddAlignmentPatterns(matrix *image.RGBA, version int) {
+	positions := GetAlignmentPatternPositions(version)
 	for _, pos := range positions {
-		addAlignmentPattern(matrix, pos.x, pos.y)
+		AddAlignmentPattern(matrix, pos.x, pos.y)
 	}
 }
 
 // Positions des motifs d'alignement pour chaque version
-func getAlignmentPatternPositions(version int) []struct{ x, y int } {
+func GetAlignmentPatternPositions(version int) []struct{ x, y int } {
 	positionMap := map[int][]int{
 		1:  {},
 		2:  {6, 18},
@@ -360,7 +360,7 @@ func getAlignmentPatternPositions(version int) []struct{ x, y int } {
 }
 
 // Ajoute un motif d'alignement à une position donnée
-func addAlignmentPattern(matrix *image.RGBA, x, y int) {
+func AddAlignmentPattern(matrix *image.RGBA, x, y int) {
 	for i := -2; i <= 2; i++ {
 		for j := -2; j <= 2; j++ {
 			if i == -2 || i == 2 || j == -2 || j == 2 || (i == 0 && j == 0) {
@@ -373,7 +373,7 @@ func addAlignmentPattern(matrix *image.RGBA, x, y int) {
 }
 
 // Applique un masque à la matrice QR et retourne la matrice masquée
-func applyMask(matrix *image.RGBA, maskPattern int) *image.RGBA {
+func ApplyMask(matrix *image.RGBA, maskPattern int) *image.RGBA {
 	size := matrix.Bounds().Max.X
 	maskedMatrix := image.NewRGBA(matrix.Bounds())
 	for y := 0; y < size; y++ {
@@ -415,7 +415,7 @@ func applyMask(matrix *image.RGBA, maskPattern int) *image.RGBA {
 }
 
 // Initialisation du champ de Galois
-func initGaloisField() {
+func InitGaloisField() {
 	var x int = 1 // Changez ici de byte à int
 	for i := 0; i < 255; i++ {
 		gf_exp[i] = byte(x) // Assurez-vous de convertir à byte ici
@@ -431,7 +431,7 @@ func initGaloisField() {
 }
 
 // Fonction de multiplication dans le champ de Galois
-func gfMultiply(x, y byte) byte {
+func GfMultiply(x, y byte) byte {
 	if x == 0 || y == 0 {
 		return 0
 	}
@@ -439,7 +439,7 @@ func gfMultiply(x, y byte) byte {
 }
 
 // Génère les syndromes Reed-Solomon
-func generateReedSolomon(data []byte, numECBytes int) []byte {
+func GenerateReedSolomon(data []byte, numECBytes int) []byte {
 	// Initialise le tableau de correction d'erreurs (syndromes)
 	ecBytes := make([]byte, numECBytes)
 
@@ -450,17 +450,17 @@ func generateReedSolomon(data []byte, numECBytes int) []byte {
 
 		// Décale les syndromes et les met à jour
 		for i := 0; i < numECBytes-1; i++ {
-			ecBytes[i] = ecBytes[i+1] ^ gfMultiply(leadCoefficient, gf_exp[i])
+			ecBytes[i] = ecBytes[i+1] ^ GfMultiply(leadCoefficient, gf_exp[i])
 		}
 		// Ajoute l'octet suivant dans le champ de Galois
-		ecBytes[numECBytes-1] = gfMultiply(leadCoefficient, gf_exp[numECBytes-1])
+		ecBytes[numECBytes-1] = GfMultiply(leadCoefficient, gf_exp[numECBytes-1])
 	}
 
 	return ecBytes
 }
 
 // Gère le niveau de correction d'erreurs et appelle la fonction Reed-Solomon
-func generateErrorCorrection(data []byte, level string) []byte {
+func GenerateErrorCorrection(data []byte, level string) []byte {
 	// Table des niveaux de correction : L = 7%, M = 15%, Q = 25%, H = 30%
 	errorCorrectionLevels := map[string]int{
 		"L": 7,
@@ -473,5 +473,5 @@ func generateErrorCorrection(data []byte, level string) []byte {
 	numECBytes := errorCorrectionLevels[level]
 
 	// Appelle la fonction Reed-Solomon pour générer les bytes de correction
-	return generateReedSolomon(data, numECBytes)
+	return GenerateReedSolomon(data, numECBytes)
 }
