@@ -4,287 +4,377 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"strconv"
+	"image/png"
+	"math"
+	"os"
 	"strings"
-	"unicode"
-	"unicode/utf8"
+	"sync"
 )
 
-// Caractéristiques des différentes versions de QR code
-var versionInfo = map[int]struct {
-	Size    int // Taille de la matrice
-	Modules int // Nombre de modules
-	// Ajoutez d'autres informations spécifiques à chaque version si nécessaire
-}{
-	1:  {21, 21},
-	2:  {25, 25},
-	3:  {29, 29},
-	4:  {33, 33},
-	5:  {37, 37},
-	6:  {41, 41},
-	7:  {45, 45},
-	8:  {49, 49},
-	9:  {53, 53},
-	10: {57, 57},
-	11: {61, 61},
-	12: {65, 65},
-	13: {69, 69},
-	14: {73, 73},
-	15: {77, 77},
-	16: {81, 81},
-	17: {85, 85},
-	18: {89, 89},
-	19: {93, 93},
-	20: {97, 97},
-	21: {101, 101},
-	22: {105, 105},
-	23: {109, 109},
-	24: {113, 113},
-	25: {117, 117},
-	26: {121, 121},
-	27: {125, 125},
-	28: {129, 129},
-	29: {133, 133},
-	30: {137, 137},
-}
+// CalculateMinVersion calcule la version minimale nécessaire pour les données
+func CalculateMinVersion(data string) int {
+	// Calculer la taille totale nécessaire en bits
+	totalBits := 4 + 8 + (len(data) * 8) // Mode (4) + Length (8) + Data (8 par caractère)
 
-var gf_exp [512]byte
-var gf_log [256]byte
-
-// EncodeAlphanumeric encode une chaîne alphanumérique en binaire selon les spécifications du QR code
-func EncodeAlphanumeric(data string) (string, error) {
-	var result string                                                    // Initialisation de la variable résultat qui contiendra la chaîne binaire finale
-	alphanumericTable := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:" // Table des caractères alphanumériques autorisés dans les QR codes
-
-	for i := 0; i < len(data); i += 2 { // Boucle sur la chaîne d'entrée par tranches de 2 caractères
-		var bitString string // Déclare une variable pour stocker la représentation binaire des caractères actuels
-		if i+1 < len(data) { // Vérifie s'il reste au moins deux caractères à traiter
-			// Combine deux caractères en une valeur de 11 bits. Le 45 représente les 45 caractères dans alphanumericTable
-			val := strings.IndexByte(alphanumericTable, data[i])*45 + strings.IndexByte(alphanumericTable, data[i+1])
-			// Formate la valeur combinée en une chaîne binaire de 11 bits
-			bitString = fmt.Sprintf("%011b", val)
-		} else {
-			// Si un seul caractère reste, convertit ce dernier en une valeur de 6 bits
-			val := strings.IndexByte(alphanumericTable, data[i])
-			// Formate la valeur en une chaîne binaire de 6 bits
-			bitString = fmt.Sprintf("%06b", val)
-		}
-		// Ajoute la chaîne binaire obtenue au résultat final
-		result += bitString
-
-		// Log pour chaque itération de la boucle
-		fmt.Printf("Processed characters %d-%d: %s (current result: %s)\n", i, i+min(2, len(data)-i)-1, data[i:min(i+2, len(data))], result)
+	// Table de capacité en bits pour le mode byte avec niveau de correction M
+	capacityTable := map[int]int{
+		1:  128,  // 16 octets
+		2:  224,  // 28 octets
+		3:  352,  // 44 octets
+		4:  512,  // 64 octets
+		5:  688,  // 86 octets
+		6:  864,  // 108 octets
+		7:  992,  // 124 octets
+		8:  1232, // 154 octets
+		9:  1456, // 182 octets
+		10: 1728, // 216 octets
 	}
 
-	fmt.Println("Encoding completed! Result:", result)
-	return result, nil // Retourne la chaîne binaire finale et une erreur nil (pas d'erreur)
-}
-
-// EncodeNumeric encode une chaîne numérique en binaire selon les spécifications du QR code
-func EncodeNumeric(data string) (string, error) {
-	var result string
-	// Traite les données par blocs de 3 chiffres
-	for i := 0; i < len(data); i += 3 {
-		// Sélectionne un bloc de 3 chiffres ou moins si c'est la fin de la chaîne
-		num := data[i:min(i+3, len(data))]
-		// Convertit le bloc en entier et gère les erreurs
-		intValue, err := toInt(num)
-		if err != nil {
-			return "", err
-		}
-		// Convertit le bloc en entier et en binaire sur 10 bits
-		bitString := fmt.Sprintf("%010b", intValue)
-		// Ajoute la chaîne binaire au résultat
-		result += bitString
-
-		// Log après chaque conversion de bloc numérique
-		fmt.Printf("Processed numeric block %d-%d: %s (current result: %s)\n", i, i+min(3, len(data)-i)-1, num, result)
-	}
-	fmt.Println("Encoding completed! Result:", result)
-	return result, nil
-}
-
-// EncodeByte encode une chaîne de caractères en binaire selon les spécifications du QR code
-func EncodeByte(data string) (string, error) {
-	var result string
-	for i := 0; i < len(data); i++ {
-		result += fmt.Sprintf("%08b", data[i])
-
-		// Log après chaque caractère encodé
-		fmt.Printf("Processed character %d: %c (current result: %s)\n", i, data[i], result)
-	}
-	fmt.Println("Encoding completed! Result:", result)
-	return result, nil
-}
-
-// EncodeKanji encode une chaîne de caractères Kanji en binaire selon les spécifications du QR code
-func EncodeKanji(data string) (string, error) {
-	var result string
-	for i := 0; i < len(data); {
-		// Décodage d'un rune à la fois
-		r, size := utf8.DecodeRuneInString(data[i:])
-		if r == utf8.RuneError {
-			return "", fmt.Errorf("encodage UTF-8 invalide à la position %d", i)
-		}
-		i += size
-
-		// Vérification et conversion selon les plages de caractères Kanji
-		switch {
-		case r >= 0x4E00 && r <= 0x9FCF:
-			// Plage Kanji Level 1: 0x4E00 - 0x9FCF
-			r -= 0x4E00
-		case r >= 0x3400 && r <= 0x4DBF:
-			// Plage Kanji Level 2: 0x3400 - 0x4DBF
-			r -= 0x3400
-		case r >= 0x20000 && r <= 0x2A6DF:
-			// Plage Kanji Level 3: 0x20000 - 0x2A6DF
-			r -= 0x20000
-		case r >= 0x2A700 && r <= 0x2B73F:
-			// Plage Kanji Level 4: 0x2A700 - 0x2B73F
-			r -= 0x2A700
-		default:
-			return "", fmt.Errorf("caractère hors de portée Kanji: %U", r)
-		}
-
-		// Séparation en MSB et LSB pour la conversion binaire
-		msb := (r >> 8) & 0xFF
-		lsb := r & 0xFF
-		code := (msb << 8) | lsb
-
-		// Conversion en format binaire sur 13 bits
-		bitString := fmt.Sprintf("%016b", code)
-		result += bitString
-
-		// Log après chaque caractère Kanji encodé
-		fmt.Printf("Caractère Kanji encodé: %c (résultat actuel: %s)\n", r, result)
-	}
-	fmt.Println("Encodage terminé ! Résultat:", result)
-	return result, nil
-}
-
-// toInt convertit une chaîne de caractères en entier
-func toInt(s string) (int, error) {
-	result, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, err
-	}
-	return result, nil
-}
-
-// min renvoie le minimum de deux entiers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Fonction utilitaire pour détecter le type de données à encoder
-func detectDataType(data string) string {
-	if _, err := strconv.Atoi(data); err == nil {
-		return "numeric"
-	} else if isAlphanumeric(data) {
-		return "alphanumeric"
-	} else if isUTF8(data) {
-		return "kanji"
-	} else {
-		return "byte"
-	}
-}
-
-// Fonction utilitaire pour vérifier si une chaîne est alphanumérique
-func isAlphanumeric(data string) bool {
-	for _, r := range data {
-		if !unicode.IsDigit(r) && !unicode.IsLetter(r) {
-			return false
+	// Trouver la première version qui peut contenir les données
+	for version := 1; version <= 10; version++ {
+		if capacity := capacityTable[version]; capacity >= totalBits {
+			return version
 		}
 	}
-	return true
+
+	return -1 // Impossible de stocker les données même avec la version maximale
 }
 
-// Fonction utilitaire pour vérifier si une chaîne est UTF-8
-func isUTF8(data string) bool {
-	return utf8.ValidString(data)
-}
-
-// GenerateQRMatrix génère une matrice QR pour une version spécifique à partir des données spécifiées
+// GenerateQRMatrix génère la matrice QR pour les données fournies
 func GenerateQRMatrix(version int, data string) *image.RGBA {
-	info, ok := versionInfo[version]
-	if !ok {
-		return nil // Gérer le cas où la version demandée n'est pas définie
+	// Calculer la version minimale nécessaire
+	minVersion := CalculateMinVersion(data)
+	if minVersion == -1 {
+		fmt.Printf("ERREUR: Les données sont trop longues même pour la version maximale\n")
+		return nil
 	}
 
-	size := info.Size
-	qrMatrix := image.NewRGBA(image.Rect(0, 0, size, size))
-
-	// Ajout des motifs de positionnement, de timing et d'alignement
-	AddPositionPatterns(qrMatrix)
-	AddTimingPatterns(qrMatrix)
-	AddAlignmentPatterns(qrMatrix, version)
-
-	// Encodage des données en fonction de leur type
-	var encodedData string
-	switch detectDataType(data) {
-	case "numeric":
-		encodedData, _ = EncodeNumeric(data)
-	case "alphanumeric":
-		encodedData, _ = EncodeAlphanumeric(data)
-	case "byte":
-		encodedData, _ = EncodeByte(data)
-	case "kanji":
-		encodedData, _ = EncodeKanji(data)
-	default:
-		return nil // Gérer le cas où le type de données n'est pas supporté
+	// Utiliser la version minimale si la version fournie est trop petite
+	if version < minVersion {
+		fmt.Printf("La version %d est trop petite pour les données. Utilisation de la version %d.\n", version, minVersion)
+		version = minVersion
 	}
 
-	// Ajout de la redondance (correction d'erreurs)
-	errorCorrectionData := GenerateErrorCorrection([]byte(encodedData), "L") // Exemple avec niveau de correction "L"
-	fullData := encodedData + string(errorCorrectionData)
+	// Vérifier la validité de la version
+	if version < 1 || version > 40 {
+		return nil
+	}
 
-	// Remplissage de la matrice QR avec les données encodées
-	index := 0
+	// Calculer la taille totale nécessaire en bits
+	totalBits := 4 + 8 + (len(data) * 8) // Mode (4) + Length (8) + Data (8 par caractère)
+
+	capacityTable := map[int]int{
+		1:  128,  // 16 octets
+		2:  224,  // 28 octets
+		3:  352,  // 44 octets
+		4:  512,  // 64 octets
+		5:  688,  // 86 octets
+		6:  864,  // 108 octets
+		7:  992,  // 124 octets
+		8:  1232, // 154 octets
+		9:  1456, // 182 octets
+		10: 1728, // 216 octets
+	}
+	if capacity, ok := capacityTable[version]; ok {
+		if capacity < totalBits {
+			fmt.Printf("ERREUR: Les données (%d bits) dépassent la capacité de la version %d (%d bits)\n",
+				totalBits, version, capacity)
+			return nil
+		}
+	}
+
+	size := version*4 + 17
+	matrix := image.NewRGBA(image.Rect(0, 0, size, size))
+
+	// Initialiser la matrice en blanc
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			if index < len(fullData) && fullData[index] == '1' {
-				qrMatrix.Set(x, y, color.Black)
-				index++
-			} else {
-				qrMatrix.Set(x, y, color.White)
-			}
+			matrix.Set(x, y, color.White)
 		}
 	}
 
-	// Appliquer le masquage (sélectionnez le meilleur masque parmi les 8)
-	bestMaskedMatrix := ApplyMask(qrMatrix, 0) // Exemple avec le masque 0
+	// Ajouter les motifs de repérage
+	AddFinderPatterns(matrix)
+	AddSeparators(matrix)
+	AddAlignmentPatterns(matrix, version)
+	AddTimingPatterns(matrix)
 
-	return bestMaskedMatrix
-}
+	// Préparer les données avec l'indicateur de mode et la longueur
+	var encodedData strings.Builder
 
-// Ajoute les motifs de positionnement à la matrice QR
-func AddPositionPatterns(matrix *image.RGBA) {
-	size := matrix.Bounds().Max.X
-	positions := []struct {
-		x, y int
-	}{
-		{0, 0},
-		{size - 7, 0},
-		{0, size - 7},
+	// Ajouter l'indicateur de mode (0100 pour mode byte)
+	encodedData.WriteString("0100")
+
+	// Ajouter la longueur des données (8 bits pour version 1-9 en mode byte)
+	lengthBits := fmt.Sprintf("%08b", len(data))
+	encodedData.WriteString(lengthBits)
+
+	// Encoder les données en mode byte
+	byteData, err := EncodeByte(data)
+	if err != nil {
+		fmt.Printf("Erreur d'encodage: %v\n", err)
+		return nil
+	}
+	encodedData.WriteString(byteData)
+
+	// Calculer la capacité disponible
+	capacity := calculateAvailableCapacity(size)
+
+	// Vérifier si les données encodées dépassent la capacité
+	if encodedData.Len() > capacity {
+		fmt.Printf("ERREUR: Les données encodées (%d bits) dépassent la capacité (%d bits)\n", encodedData.Len(), capacity)
+		return nil
 	}
 
-	for _, pos := range positions {
-		for i := 0; i < 7; i++ {
-			for j := 0; j < 7; j++ {
-				if i == 0 || i == 6 || j == 0 || j == 6 || (i >= 2 && i <= 4 && j >= 2 && j <= 4) {
-					matrix.Set(pos.x+i, pos.y+j, color.Black)
-				} else {
-					matrix.Set(pos.x+i, pos.y+j, color.White)
+	// Ajouter le terminateur
+	for encodedData.Len() < capacity && encodedData.Len() < capacity-4 {
+		encodedData.WriteString("0")
+	}
+
+	// Ajouter la correction d'erreur
+	finalData := AddErrorCorrection(encodedData.String(), "M", version)
+
+	fmt.Printf("Capacité disponible: %d bits\n", capacity)
+	fmt.Printf("Longueur des données encodées: %d bits\n", len(finalData))
+	fmt.Printf("Données encodées: %s\n", finalData)
+
+	// Placer les données
+	PlaceData(matrix, finalData)
+
+	// Appliquer le meilleur masque
+	bestScore := math.MaxInt32
+	var bestMatrix *image.RGBA
+	bestMask := 0
+
+	for mask := 0; mask < 8; mask++ {
+		maskedMatrix := ApplyMask(matrix, mask)
+		score := EvaluateMask(maskedMatrix)
+
+		if score < bestScore {
+			bestScore = score
+			bestMatrix = maskedMatrix
+			bestMask = mask
+		}
+	}
+
+	if bestMatrix != nil {
+		matrix = bestMatrix
+		AddFormatInfo(matrix, "M", bestMask)
+	}
+
+	return matrix
+}
+
+// EvaluateMask évalue la qualité d'un masque selon les règles de pénalité du QR code
+func EvaluateMask(matrix *image.RGBA) int {
+	score := 0
+	size := matrix.Bounds().Max.X
+
+	// Règle 1: Groupes de modules de même couleur
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			if x+4 < size {
+				// Vérifier horizontalement
+				count := 1
+				color := matrix.At(x, y)
+				for i := 1; i < 5; i++ {
+					if matrix.At(x+i, y) == color {
+						count++
+					}
+				}
+				if count >= 5 {
+					score += count - 2
+				}
+			}
+			if y+4 < size {
+				// Vérifier verticalement
+				count := 1
+				color := matrix.At(x, y)
+				for i := 1; i < 5; i++ {
+					if matrix.At(x, y+i) == color {
+						count++
+					}
+				}
+				if count >= 5 {
+					score += count - 2
 				}
 			}
 		}
 	}
+
+	return score
 }
 
-// Ajoute les motifs de timing à la matrice QR
+// AddFinderPatterns ajoute les motifs de positionnement à la matrice QR
+func AddFinderPatterns(matrix *image.RGBA) {
+	// Positions des motifs de positionnement (en haut à gauche, en haut à droite, en bas à gauche)
+	positions := []struct{ x, y int }{
+		{0, 0},                         // En haut à gauche
+		{matrix.Bounds().Max.X - 7, 0}, // En haut à droite
+		{0, matrix.Bounds().Max.Y - 7}, // En bas à gauche
+	}
+
+	for _, pos := range positions {
+		// Dessiner le carré extérieur 7x7
+		for i := 0; i < 7; i++ {
+			for j := 0; j < 7; j++ {
+				if i == 0 || i == 6 || j == 0 || j == 6 {
+					matrix.Set(pos.x+i, pos.y+j, color.Black)
+				}
+			}
+		}
+
+		// Dessiner le carré intérieur 5x5
+		for i := 1; i < 6; i++ {
+			for j := 1; j < 6; j++ {
+				matrix.Set(pos.x+i, pos.y+j, color.White)
+			}
+		}
+
+		// Dessiner le carré central 3x3
+		for i := 2; i < 5; i++ {
+			for j := 2; j < 5; j++ {
+				matrix.Set(pos.x+i, pos.y+j, color.Black)
+			}
+		}
+	}
+}
+
+// AddSeparators ajoute les séparateurs à la matrice QR
+func AddSeparators(matrix *image.RGBA) {
+	size := matrix.Bounds().Max.X
+
+	// Séparateurs horizontaux
+	for x := 0; x < 8; x++ {
+		matrix.Set(x, 7, color.White)        // En haut à gauche
+		matrix.Set(size-8+x, 7, color.White) // En haut à droite
+		matrix.Set(x, size-8, color.White)   // En bas à gauche
+	}
+
+	// Séparateurs verticaux
+	for y := 0; y < 8; y++ {
+		matrix.Set(7, y, color.White)        // En haut à gauche
+		matrix.Set(size-8, y, color.White)   // En haut à droite
+		matrix.Set(7, size-8+y, color.White) // En bas à gauche
+	}
+}
+
+// PlaceData place les données dans la matrice QR selon le motif en zigzag
+func PlaceData(matrix *image.RGBA, data string) {
+	size := matrix.Bounds().Max.X
+	dataIndex := 0
+	upward := true
+
+	// Vérifier la longueur des données
+	fmt.Printf("Données à placer : %s (longueur: %d)\n", data, len(data))
+
+	// Commencer par le coin en bas à droite
+	for x := size - 1; x >= 0 && dataIndex < len(data); x -= 2 {
+		// Traiter deux colonnes à la fois
+		for dx := 0; dx <= 1 && x-dx >= 0; dx++ {
+			currentX := x - dx
+
+			// Sauter la colonne de timing
+			if currentX == 6 {
+				continue
+			}
+
+			if upward {
+				// Monter
+				for y := size - 1; y >= 0 && dataIndex < len(data); y-- {
+					if isValidDataPosition(currentX, y, size) {
+						if dataIndex < len(data) {
+							fmt.Printf("Module placé à (%d,%d): %c [Total: %d]\n",
+								currentX, y, data[dataIndex], dataIndex+1)
+							if data[dataIndex] == '1' {
+								matrix.Set(currentX, y, color.Black)
+							} else {
+								matrix.Set(currentX, y, color.White)
+							}
+							dataIndex++
+						}
+					}
+				}
+			} else {
+				// Descendre
+				for y := 0; y < size && dataIndex < len(data); y++ {
+					if isValidDataPosition(currentX, y, size) {
+						if dataIndex < len(data) {
+							fmt.Printf("Module placé à (%d,%d): %c [Total: %d]\n",
+								currentX, y, data[dataIndex], dataIndex+1)
+							if data[dataIndex] == '1' {
+								matrix.Set(currentX, y, color.Black)
+							} else {
+								matrix.Set(currentX, y, color.White)
+							}
+							dataIndex++
+						}
+					}
+				}
+			}
+			upward = !upward
+		}
+	}
+
+	fmt.Printf("Total des modules placés : %d\n", dataIndex)
+}
+
+// isValidDataPosition vérifie si une position peut contenir des données
+func isValidDataPosition(x, y, size int) bool {
+	// Vérifier les motifs de positionnement
+	if (x < 9 && y < 9) || // En haut à gauche
+		(x > size-9 && y < 9) || // En haut à droite
+		(x < 9 && y > size-9) { // En bas à gauche
+		return false
+	}
+
+	// Vérifier la colonne de timing
+	if x == 6 {
+		return false
+	}
+
+	// Vérifier la ligne de timing
+	if y == 6 {
+		return false
+	}
+
+	// Vérifier les motifs d'alignement
+	alignmentPositions := getAlignmentPositions(size)
+	for _, ax := range alignmentPositions {
+		for _, ay := range alignmentPositions {
+			if x >= ax-2 && x <= ax+2 && y >= ay-2 && y <= ay+2 {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// getAlignmentPositions calcule les positions des motifs d'alignement
+func getAlignmentPositions(size int) []int {
+	version := (size - 17) / 4
+	if version < 2 {
+		return []int{}
+	}
+
+	// Table des positions des motifs d'alignement pour les versions 2-7
+	positions := map[int][]int{
+		2: {6, 18},
+		3: {6, 22},
+		4: {6, 26},
+		5: {6, 30},
+		6: {6, 34},
+		7: {6, 22, 38},
+	}
+
+	if pos, ok := positions[version]; ok {
+		return pos
+	}
+	return []int{}
+}
+
+// AddTimingPatterns ajoute les motifs de timing à la matrice QR
 func AddTimingPatterns(matrix *image.RGBA) {
 	size := matrix.Bounds().Max.X
 	for i := 8; i < size-8; i++ {
@@ -297,66 +387,12 @@ func AddTimingPatterns(matrix *image.RGBA) {
 	}
 }
 
-// Ajoute les motifs d'alignement à la matrice QR
+// AddAlignmentPatterns ajoute les motifs d'alignement à la matrice QR
 func AddAlignmentPatterns(matrix *image.RGBA, version int) {
 	positions := GetAlignmentPatternPositions(version)
 	for _, pos := range positions {
 		AddAlignmentPattern(matrix, pos.x, pos.y)
 	}
-}
-
-// Positions des motifs d'alignement pour chaque version
-func GetAlignmentPatternPositions(version int) []struct{ x, y int } {
-	positionMap := map[int][]int{
-		1:  {},
-		2:  {6, 18},
-		3:  {6, 22},
-		4:  {6, 26},
-		5:  {6, 30},
-		6:  {6, 34},
-		7:  {6, 22, 38},
-		8:  {6, 24, 42},
-		9:  {6, 26, 46},
-		10: {6, 28, 50},
-		11: {6, 30, 54},
-		12: {6, 32, 58},
-		13: {6, 34, 62},
-		14: {6, 26, 46, 66},
-		15: {6, 26, 48, 70},
-		16: {6, 26, 50, 74},
-		17: {6, 30, 54, 78},
-		18: {6, 30, 56, 82},
-		19: {6, 30, 58, 86},
-		20: {6, 34, 62, 90},
-		21: {6, 28, 50, 72, 94},
-		22: {6, 26, 50, 74, 98},
-		23: {6, 30, 54, 78, 102},
-		24: {6, 28, 54, 80, 106},
-		25: {6, 32, 58, 84, 110},
-		26: {6, 30, 58, 86, 114},
-		27: {6, 34, 62, 90, 118},
-		28: {6, 26, 50, 74, 98, 122},
-		29: {6, 30, 54, 78, 102, 126},
-		30: {6, 26, 52, 78, 104, 130},
-	}
-
-	positions, exists := positionMap[version]
-	if !exists {
-		return []struct{ x, y int }{}
-	}
-
-	var result []struct{ x, y int }
-	for _, x := range positions {
-		for _, y := range positions {
-			// Skip the position if it's at the top-left, top-right, or bottom-left corners
-			if (x == 6 && y == 6) || (x == 6 && y == positions[len(positions)-1]) || (x == positions[len(positions)-1] && y == 6) {
-				continue
-			}
-			result = append(result, struct{ x, y int }{x, y})
-		}
-	}
-
-	return result
 }
 
 // Ajoute un motif d'alignement à une position donnée
@@ -372,106 +408,163 @@ func AddAlignmentPattern(matrix *image.RGBA, x, y int) {
 	}
 }
 
-// Applique un masque à la matrice QR et retourne la matrice masquée
-func ApplyMask(matrix *image.RGBA, maskPattern int) *image.RGBA {
-	size := matrix.Bounds().Max.X
-	maskedMatrix := image.NewRGBA(matrix.Bounds())
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			originalColor := matrix.At(x, y)
-			shouldInvert := false
-			switch maskPattern {
-			case 0:
-				shouldInvert = (x+y)%2 == 0
-			case 1:
-				shouldInvert = y%2 == 0
-			case 2:
-				shouldInvert = x%3 == 0
-			case 3:
-				shouldInvert = (x+y)%3 == 0
-			case 4:
-				shouldInvert = (y/2+x/3)%2 == 0
-			case 5:
-				shouldInvert = ((x*y)%2 + (x*y)%3) == 0
-			case 6:
-				shouldInvert = (((x*y)%2 + (x*y)%3) % 2) == 0
-			case 7:
-				shouldInvert = (((x+y)%2 + (x*y)%3) % 2) == 0
-			}
-			if shouldInvert {
-				r, g, b, a := originalColor.RGBA()
-				if r == 0 && g == 0 && b == 0 && a == 0xFFFF { // Vérifie si la couleur originale est complètement noire et opaque
-					maskedMatrix.Set(x, y, color.White) // Inverser le noir en blanc
-				} else { // Autre couleur que le noir complet
-					maskedMatrix.Set(x, y, color.Black) // Ne pas inverser, garder la couleur originale ou inverser en noir
+// Structure pour les tâches de traitement
+type DataProcessingTask struct {
+	data   string
+	result chan string
+}
+
+// Pool de workers pour le traitement des données
+func ProcessDataWithWorkers(data string, numWorkers int) string {
+	tasks := make(chan DataProcessingTask)
+
+	// Démarrage des workers
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for task := range tasks {
+				var result string
+				switch DetectDataType(task.data) {
+				case "numeric":
+					result, _ = EncodeNumeric(task.data)
+				case "alphanumeric":
+					result, _ = EncodeAlphanumeric(task.data)
+				case "byte":
+					result, _ = EncodeByte(task.data)
+				case "kanji":
+					result, _ = EncodeKanji(task.data)
 				}
-			} else {
-				maskedMatrix.Set(x, y, originalColor) // Pas d'inversion, utiliser la couleur originale
+				task.result <- result
 			}
+		}()
+	}
 
+	// Diviser les données en chunks et les envoyer aux workers
+	chunkSize := len(data) / numWorkers
+	if chunkSize == 0 {
+		chunkSize = 1
+	}
+
+	var finalResult strings.Builder
+	var wg sync.WaitGroup
+
+	for i := 0; i < len(data); i += chunkSize {
+		wg.Add(1)
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+
+		resultChan := make(chan string)
+		tasks <- DataProcessingTask{
+			data:   data[i:end],
+			result: resultChan,
+		}
+
+		go func() {
+			defer wg.Done()
+			result := <-resultChan
+			finalResult.WriteString(result)
+		}()
+	}
+
+	wg.Wait()
+	close(tasks)
+
+	return finalResult.String()
+}
+
+// SaveQRImage sauvegarde la matrice QR en image PNG
+func SaveQRImage(matrix *image.RGBA, outputFile string, scale int) error {
+	bounds := matrix.Bounds()
+	width, height := bounds.Max.X, bounds.Max.Y
+
+	// Création d'une nouvelle image avec la taille mise à l'échelle
+	scaledImage := image.NewRGBA(image.Rect(0, 0, width*scale, height*scale))
+
+	// Mise à l'échelle de l'image
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			color := matrix.At(x, y)
+			for sy := 0; sy < scale; sy++ {
+				for sx := 0; sx < scale; sx++ {
+					scaledImage.Set(x*scale+sx, y*scale+sy, color)
+				}
+			}
 		}
 	}
-	return maskedMatrix
+
+	// Création du fichier de sortie
+	file, err := os.Create(outputFile)
+	if err != nil {
+		return fmt.Errorf("erreur lors de la création du fichier : %v", err)
+	}
+	defer file.Close()
+
+	// Encodage en PNG
+	if err := png.Encode(file, scaledImage); err != nil {
+		return fmt.Errorf("erreur lors de l'encodage PNG : %v", err)
+	}
+
+	return nil
 }
 
-// Initialisation du champ de Galois
-func InitGaloisField() {
-	var x int = 1 // Changez ici de byte à int
-	for i := 0; i < 255; i++ {
-		gf_exp[i] = byte(x) // Assurez-vous de convertir à byte ici
-		gf_log[x] = byte(i)
-		x <<= 1
-		if x&0x100 != 0 {
-			x ^= 0x1D // Polynôme générateur pour GF(2^8)
+// AddFormatInfo ajoute l'information de format au QR code
+func AddFormatInfo(matrix *image.RGBA, ecLevel string, maskPattern int) {
+	formatInfoBits := FormatInfo[ecLevel][maskPattern]
+	size := matrix.Bounds().Max.X
+
+	// Placer l'information de format autour du motif de positionnement en haut à gauche
+	for i := 0; i < 15; i++ {
+		bit := formatInfoBits[i] == '1'
+		if i < 6 {
+			// Position horizontale
+			if bit {
+				matrix.Set(i, 8, color.Black)
+			} else {
+				matrix.Set(i, 8, color.White)
+			}
+		} else if i < 8 {
+			// Position horizontale (après le timing pattern)
+			if bit {
+				matrix.Set(i+1, 8, color.Black)
+			} else {
+				matrix.Set(i+1, 8, color.White)
+			}
+		} else {
+			// Position verticale
+			if bit {
+				matrix.Set(8, size-1-(14-i), color.Black)
+			} else {
+				matrix.Set(8, size-1-(14-i), color.White)
+			}
+		}
+
+		// Copier l'information de format sur le côté droit et en bas
+		if i < 7 {
+			if bit {
+				matrix.Set(size-7+i, 8, color.Black)
+			} else {
+				matrix.Set(size-7+i, 8, color.White)
+			}
+		} else {
+			if bit {
+				matrix.Set(8, 6-(i-7), color.Black)
+			} else {
+				matrix.Set(8, 6-(i-7), color.White)
+			}
 		}
 	}
-	for i := 255; i < 512; i++ {
-		gf_exp[i] = gf_exp[i-255]
-	}
 }
 
-// Fonction de multiplication dans le champ de Galois
-func GfMultiply(x, y byte) byte {
-	if x == 0 || y == 0 {
-		return 0
-	}
-	return gf_exp[gf_log[x]+gf_log[y]]
-}
-
-// Génère les syndromes Reed-Solomon
-func GenerateReedSolomon(data []byte, numECBytes int) []byte {
-	// Initialise le tableau de correction d'erreurs (syndromes)
-	ecBytes := make([]byte, numECBytes)
-
-	// Parcourt chaque octet des données
-	for _, dataByte := range data {
-		// Calcule le coefficient principal
-		leadCoefficient := dataByte ^ ecBytes[0]
-
-		// Décale les syndromes et les met à jour
-		for i := 0; i < numECBytes-1; i++ {
-			ecBytes[i] = ecBytes[i+1] ^ GfMultiply(leadCoefficient, gf_exp[i])
+// Ajout d'une fonction pour calculer la capacité disponible
+func calculateAvailableCapacity(size int) int {
+	capacity := 0
+	for x := 0; x < size; x++ {
+		for y := 0; y < size; y++ {
+			if isValidDataPosition(x, y, size) {
+				capacity++
+			}
 		}
-		// Ajoute l'octet suivant dans le champ de Galois
-		ecBytes[numECBytes-1] = GfMultiply(leadCoefficient, gf_exp[numECBytes-1])
 	}
-
-	return ecBytes
-}
-
-// Gère le niveau de correction d'erreurs et appelle la fonction Reed-Solomon
-func GenerateErrorCorrection(data []byte, level string) []byte {
-	// Table des niveaux de correction : L = 7%, M = 15%, Q = 25%, H = 30%
-	errorCorrectionLevels := map[string]int{
-		"L": 7,
-		"M": 15,
-		"Q": 25,
-		"H": 30,
-	}
-
-	// Récupère le nombre de bytes de correction pour le niveau donné
-	numECBytes := errorCorrectionLevels[level]
-
-	// Appelle la fonction Reed-Solomon pour générer les bytes de correction
-	return GenerateReedSolomon(data, numECBytes)
+	return capacity
 }
