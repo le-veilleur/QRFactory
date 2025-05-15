@@ -196,18 +196,21 @@ func TestGenerateQRMatrix(t *testing.T) {
 		name    string
 		version int
 		data    string
+		ecLevel string
 		wantNil bool
 	}{
 		{
 			name:    "Version 1 valide",
 			version: 1,
 			data:    "HELLO",
+			ecLevel: "M",
 			wantNil: false,
 		},
 		{
 			name:    "Version invalide",
 			version: 50,
 			data:    "TEST",
+			ecLevel: "M",
 			wantNil: true,
 		},
 	}
@@ -215,7 +218,7 @@ func TestGenerateQRMatrix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			InitGaloisField() // Initialisation nécessaire
-			result := GenerateQRMatrix(tt.version, tt.data)
+			result := GenerateQRMatrix(tt.version, tt.data, tt.ecLevel)
 			if (result == nil) != tt.wantNil {
 				t.Errorf("GenerateQRMatrix() returned nil: %v, want nil: %v", result == nil, tt.wantNil)
 			}
@@ -315,7 +318,7 @@ func TestIsKanji(t *testing.T) {
 func TestGenerateQRCodeWithURL(t *testing.T) {
 	url := "https://example.com"
 	version := 1
-	matrix := GenerateQRMatrix(version, url)
+	matrix := GenerateQRMatrix(version, url, "M")
 
 	if matrix == nil {
 		t.Error("GenerateQRMatrix returned nil")
@@ -333,5 +336,23 @@ func TestGenerateQRCodeWithURL(t *testing.T) {
 	// Vérifier que le fichier existe
 	if _, err := os.Stat(tempFile); os.IsNotExist(err) {
 		t.Errorf("SaveQRImage() failed to create file")
+	}
+}
+
+func TestURLDetection(t *testing.T) {
+	url := "https://github.com/le-veilleur"
+
+	// Tester la détection du type
+	dataType := DetectDataType(url)
+	if dataType != "alphanumeric" {
+		t.Errorf("URL '%s' devrait être détectée comme alphanumérique, mais a été détectée comme %s", url, dataType)
+	}
+
+	// Vérifier que le QR code peut être généré correctement
+	InitGaloisField() // Nécessaire pour la génération
+	// Commencer avec la version 1 et laisser l'algorithme ajuster
+	qrMatrix := GenerateQRMatrix(1, url, "M")
+	if qrMatrix == nil {
+		t.Errorf("La génération de QR code a échoué")
 	}
 }

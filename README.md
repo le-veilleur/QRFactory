@@ -6,6 +6,7 @@ QRFactory est une application Go en cours de développement, conçue pour géné
 
 - [Installation](#installation)
 - [Utilisation](#utilisation)
+- [Interface en ligne de commande (CLI)](#interface-en-ligne-de-commande-cli)
 - [Architecture](#architecture)
 - [Tests](#tests)
 - [Contribuer](#contribuer)
@@ -33,6 +34,38 @@ Pour générer un code QR, exécutez la commande suivante :
 
 ```sh
 go run cmd/qrfactory/main.go
+```
+
+### Interface en ligne de commande (CLI)
+
+QRFactory propose une interface en ligne de commande complète avec plusieurs options de personnalisation :
+
+```sh
+go run cmd/qrfactory/main.go -d "https://github.com/le-veilleur" -s 10
+```
+
+Options disponibles :
+- `-d, --data` : Données à encoder dans le QR code (obligatoire)
+- `-s, --scale` : Facteur d'échelle pour l'image (défaut: 10)
+- `-v, --version` : Version du QR code (1-40, défaut: 1)
+- `-e, --error-level` : Niveau de correction d'erreur (L, M, Q, H, défaut: L)
+- `-o, --output` : Nom du fichier de sortie (défaut: qrcode.png)
+- `--bg-color` : Couleur de fond (défaut: white)
+- `--fg-color` : Couleur des modules (défaut: black)
+
+Exemples d'utilisation :
+```sh
+# Générer un QR code simple
+go run cmd/qrfactory/main.go -d "https://github.com/le-veilleur"
+
+# Générer un QR code avec une échelle personnalisée
+go run cmd/qrfactory/main.go -d "https://github.com/le-veilleur" -s 15
+
+# Générer un QR code avec un niveau de correction d'erreur élevé
+go run cmd/qrfactory/main.go -d "https://github.com/le-veilleur" -e H
+
+# Générer un QR code avec des couleurs personnalisées
+go run cmd/qrfactory/main.go -d "https://github.com/le-veilleur" --bg-color "#FFFFFF" --fg-color "#000000"
 ```
 
 ### Exemple

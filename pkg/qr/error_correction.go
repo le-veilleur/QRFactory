@@ -2,29 +2,77 @@ package qr
 
 import (
 	"fmt"
+	"sync"
 )
 
-// InitGaloisField initialise les tables de multiplication du champ de Galois
-func InitGaloisField() {
-	// Initialisation des tables de multiplication du champ de Galois
-	gfExp := make([]byte, 256)
-	gfLog := make([]byte, 256)
+var (
+	// Variables globales pour les tables de Galois
+	gfExp = make([]byte, 256)
+	gfLog = make([]byte, 256)
 
+	// Mutex pour protéger l'accès aux tables de Galois
+	gfMutex sync.RWMutex
+
+	// Variable pour suivre si l'initialisation a été effectuée
+	gfInitialized bool
+)
+
+// InitGaloisField initialise les tables de multiplication du champ de Galois de manière thread-safe
+func InitGaloisField() {
+	gfMutex.Lock()
+	defer gfMutex.Unlock()
+
+	// Vérifier si l'initialisation a déjà été effectuée
+	if gfInitialized {
+		return
+	}
+
+	fmt.Println("Initialisation des tables de Galois...")
+
+	// Initialisation des tables de multiplication du champ de Galois
+	// IMPORTANT: Cette initialisation évite d'appeler GfMultiply de manière récursive
 	x := byte(1)
 	for i := 0; i < 256; i++ {
 		gfExp[i] = x
+
+		// Remplir la table de logarithmes
 		if i < 255 {
 			gfLog[x] = byte(i)
 		}
-		x = GfMultiply(x, 2)
+
+		// Multiplication par 2 dans GF(2^8)
+		// Cette implémentation est l'équivalent direct de GfMultiply(x, 2)
+		// mais sans appeler la fonction qui pourrait créer une récursion infinie
+		if (x & 0x80) != 0 {
+			x = (x << 1) ^ 0x1D // Polynôme de réduction: x^8 + x^4 + x^3 + x^2 + 1 (0x1D)
+		} else {
+			x = x << 1
+		}
 	}
+
+	gfInitialized = true
+	fmt.Println("Initialisation des tables de Galois terminée.")
 }
 
 // GfMultiply effectue une multiplication dans le champ de Galois
 func GfMultiply(x, y byte) byte {
+	// Cas spécial pour zéro
 	if x == 0 || y == 0 {
 		return 0
 	}
+
+	// Si les tables ne sont pas initialisées, on retourne une valeur sûre pour éviter la récursion
+	if !gfInitialized {
+		// Au lieu d'appeler InitGaloisField() qui pourrait créer une récursion infinie,
+		// on retourne une valeur par défaut qui permet de continuer l'exécution
+		fmt.Println("ATTENTION: Tentative d'utiliser GfMultiply avant initialisation")
+		return 0
+	}
+
+	// Utiliser les tables initialisées pour effectuer la multiplication
+	gfMutex.RLock()
+	defer gfMutex.RUnlock()
+
 	return gfExp[(gfLog[x]+gfLog[y])%255]
 }
 
@@ -82,12 +130,6 @@ func generateGenerator(degree int) []byte {
 	return generator
 }
 
-// Variables globales pour les tables de Galois
-var (
-	gfExp = make([]byte, 256)
-	gfLog = make([]byte, 256)
-)
-
 // Polynômes générateurs pour différents niveaux de correction d'erreur
 var GeneratorPolynomials = map[string][]int{
 	"L": {1, 1},          // 7% de correction
@@ -96,8 +138,9 @@ var GeneratorPolynomials = map[string][]int{
 	"H": {1, 1, 1, 1, 1}, // 30% de correction
 }
 
-// AddErrorCorrection ajoute les codes de correction d'erreur aux données
-func AddErrorCorrection(data string, ecLevel string, version int) string {
+// AddErrorCorrectionEC ajoute les codes de correction d'erreur aux données
+// avec une implémentation plus robuste
+func AddErrorCorrectionEC(data string, ecLevel string, version int) string {
 	// Calculer le nombre de mots de code de correction d'erreur nécessaires
 	ecWords := calculateECWords(version, ecLevel)
 

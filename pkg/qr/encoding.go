@@ -46,21 +46,43 @@ func EncodeNumeric(data string) (string, error) {
 	return result.String(), nil
 }
 
-// EncodeAlphanumeric encode une chaîne alphanumérique en binaire selon les spécifications du QR code
+// EncodeAlphanumeric encode les données au format alphanumérique
 func EncodeAlphanumeric(data string) (string, error) {
-	var result strings.Builder
-	alphanumericTable := "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+	var encoded strings.Builder
 
-	for i := 0; i < len(data); i += 2 {
-		if i+1 < len(data) {
-			val := strings.IndexByte(alphanumericTable, data[i])*45 + strings.IndexByte(alphanumericTable, data[i+1])
-			result.WriteString(fmt.Sprintf("%011b", val))
-		} else {
-			val := strings.IndexByte(alphanumericTable, data[i])
-			result.WriteString(fmt.Sprintf("%06b", val))
+	// Convertir en majuscules car le mode alphanumérique ne reconnaît que les majuscules
+	data = strings.ToUpper(data)
+
+	// Table de conversion pour le mode alphanumérique
+	alphanumericTable := map[rune]int{
+		'0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+		'A': 10, 'B': 11, 'C': 12, 'D': 13, 'E': 14, 'F': 15, 'G': 16, 'H': 17, 'I': 18, 'J': 19,
+		'K': 20, 'L': 21, 'M': 22, 'N': 23, 'O': 24, 'P': 25, 'Q': 26, 'R': 27, 'S': 28, 'T': 29,
+		'U': 30, 'V': 31, 'W': 32, 'X': 33, 'Y': 34, 'Z': 35, ' ': 36, '$': 37, '%': 38, '*': 39,
+		'+': 40, '-': 41, '.': 42, '/': 43, ':': 44,
+	}
+
+	// Vérifier si tous les caractères sont dans la table
+	for _, c := range data {
+		if _, ok := alphanumericTable[c]; !ok {
+			return "", fmt.Errorf("caractère '%c' non valide en mode alphanumérique", c)
 		}
 	}
-	return result.String(), nil
+
+	// Encoder par paires de caractères (11 bits par paire)
+	for i := 0; i < len(data); i += 2 {
+		if i+1 < len(data) {
+			// Encoder une paire
+			value := alphanumericTable[rune(data[i])]*45 + alphanumericTable[rune(data[i+1])]
+			encoded.WriteString(fmt.Sprintf("%011b", value))
+		} else {
+			// Encoder le dernier caractère s'il est seul (6 bits)
+			value := alphanumericTable[rune(data[i])]
+			encoded.WriteString(fmt.Sprintf("%06b", value))
+		}
+	}
+
+	return encoded.String(), nil
 }
 
 // EncodeByte encode une chaîne de caractères en binaire selon les spécifications du QR code

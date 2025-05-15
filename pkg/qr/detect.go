@@ -7,11 +7,6 @@ import (
 
 // detectDataType détermine le type de données à encoder
 func DetectDataType(data string) string {
-	// Vérifier si c'est une URL
-	if strings.HasPrefix(data, "http://") || strings.HasPrefix(data, "https://") {
-		return "byte"
-	}
-
 	// Vérifier si c'est numérique
 	if _, err := strconv.Atoi(data); err == nil {
 		return "numeric"
